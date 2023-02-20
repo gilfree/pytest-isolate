@@ -16,6 +16,7 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 * Add Timeout to a forked test
 * Limit memory used by test
 * Plays nice with pytest-xdist
+* Shows warnings, even with xdist!
 
 ## Requirements
 
