@@ -1,7 +1,7 @@
 # This file is was originally based on pytest forked:
 # see: https://github.com/pytest-dev/pytest-forked/blob/master/src/pytest_forked/__init__.py
-# Since pytest forked is un unmaintained, 
-# I decided to make my changes in a different project.
+# Since pytest forked is un unmaintained I decided to make my 
+# changes in a different project
 # Please see README.md
 
 
@@ -13,7 +13,6 @@ import resource
 import sys
 import warnings
 from contextlib import contextmanager
-from datetime import datetime
 from queue import Empty
 from typing import Any, List, Optional, Tuple
 
@@ -29,6 +28,11 @@ except ImportError:
     pass
 
 try:
+    import setproctitle # noqa F401
+except ImportError:
+    pass
+
+try:
     from tblib import pickling_support
 
     pickling_support.install()
@@ -37,26 +41,33 @@ except ImportError:
 
 
 def forked_subprocess(
-    target, args=(), timeout=None, memlimt=None
+    target, args=(), timeout=None, memlimt=None, cpulimit=None
 ) -> Tuple[Any, int, bool]:
     sub = ForkedSubprocess()
-    exitcode, timed_out, result = sub.run_in_subprocess(timeout, memlimt, target, args)
+    exitcode, timed_out, result = sub.run_in_subprocess(
+        timeout, memlimt, cpulimit, target, args
+    )
     return result, exitcode, timed_out
 
 
 @contextmanager
-def limits(max_mem):
-    if not max_mem:
+def limits(max_mem, max_cpu):
+    if not max_mem and not max_cpu:
         yield
         return
-    (soft, hard) = resource.getrlimit(resource.RLIMIT_DATA)
-    resource.setrlimit(resource.RLIMIT_DATA, (max_mem, hard))
-    (soft, hard) = resource.getrlimit(resource.RLIMIT_DATA)
+    (soft_mem, hard_mem) = resource.getrlimit(resource.RLIMIT_DATA)
+    (soft_cpu, hard_cpu) = resource.getrlimit(resource.RLIMIT_CPU)
+    if max_mem:
+        resource.setrlimit(resource.RLIMIT_DATA, (max_mem, hard_mem))
+    if max_cpu:
+        resource.setrlimit(resource.RLIMIT_CPU, (max_cpu, hard_cpu))
     try:
         yield
     finally:
-        pass
-        resource.setrlimit(resource.RLIMIT_DATA, (soft, hard))
+        if max_mem:
+            resource.setrlimit(resource.RLIMIT_DATA, (soft_mem, hard_mem))
+        if max_cpu:
+            resource.setrlimit(resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
     return
 
 
@@ -91,7 +102,7 @@ class ForkedSubprocess:
         os.close(self.w_out)
         os.close(self.w_err)
 
-    def run_in_subprocess(self, timeout, memlimit, target, args=()):
+    def run_in_subprocess(self, timeout, memlimit, cpulimit, target, args=()):
         ctx = mp.get_context("fork")
         q = ctx.Queue()
         timed_out = None
@@ -99,9 +110,8 @@ class ForkedSubprocess:
         def run_subprocess():
             # Close the read fd, redirect output to write fd
             self.child_redirect_streams()
-
             try:
-                with limits(memlimit):
+                with limits(memlimit, cpulimit):
                     q.put(dill.dumps(target(*args)))
             except BaseException as e:
                 q.put(dill.dumps(e))
@@ -183,11 +193,20 @@ def pytest_addoption(parser):
         default=None,
         help="Limit the memory usage of the test ",
     )
+    group.addoption(
+        "--isolate-cpu-limit",
+        dest="isolate_cpu_limit",
+        default=None,
+        help="Limit the CPU usage of the test ",
+    )
     parser.addini(
         "isolate_timeout", "Default timeout for isolated tests", type="string"
     )
     parser.addini(
         "isolate_mem_limit", "Default memory limit for isolated tests", type="string"
+    )
+    parser.addini(
+        "isolate_cpu_limit", "Default cpu limit for isolated tests", type="string"
     )
 
 
@@ -208,8 +227,8 @@ def pytest_configure(config):
         warnings.warn(
             "Isolate is a replacement for pytest-timeout. "
             "Pytest-timeout will take precedence while installed, "
-            "tests with timeout will not be isolated. please uninstall one of "
-            "the plugins"
+            "tests with timeout will not be isolated. "
+            "Please uninstall one of the plugins"
         )
     else:
         config.addinivalue_line(
@@ -221,7 +240,6 @@ def pytest_configure(config):
 # Taken from pytest 7.2:
 @contextmanager
 def catch_warnings(item: pytest.Item):
-
     """Context manager that catches warnings generated in the contained execution block.
 
     ``item`` can be None if we are not in the context of an item execution.
@@ -254,14 +272,25 @@ def catch_warnings(item: pytest.Item):
 
 
 def run_subprocess(item: pytest.Item):
-
     item.config.pluginmanager.unregister(name="capturemanager")
+    try:
+        if not os.getenv("PYTEST_ISOLATE_NO_SETPROCTITLE"):
+            import setproctitle  # noqa F811
 
+            setproctitle.setproctitle(f"pytest {item.nodeid}")
+    except ImportError:
+        pass
     try:
         with catch_warnings(item) as warnings:
             reports = runtestprotocol(item, log=False)
         s_reports = []
         for report in reports:
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            cpu_usage = usage.ru_utime + usage.ru_stime
+            usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+            cpu_usage += usage.ru_utime + usage.ru_stime
+            report.user_properties.append(("cpu_usage", cpu_usage))
+            report.cpu_usage = cpu_usage
             s_reports.append(
                 item.config.hook.pytest_report_to_serializable(
                     config=item.config, report=report
@@ -273,28 +302,29 @@ def run_subprocess(item: pytest.Item):
 
 
 def run_in_subprocess(
-    item: pytest.Item, timeout: Optional[float], mem_limit: Optional[int]
+    item: pytest.Item,
+    timeout: Optional[float],
+    mem_limit: Optional[int],
+    cpu_limit: Optional[int],
 ) -> List[pytest.TestReport]:
-
-    cap: _pytest.capture.CaptureManager = item.config.pluginmanager.getplugin(
-        "capturemanager"
-    )
+    cap = item.config.pluginmanager.getplugin("capturemanager")
+    assert isinstance(cap, _pytest.capture.CaptureManager)
     cap.resume_global_capture()
     cap.activate_fixture()
-    current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    print(f"{current_time}: Test lunched {item.nodeid} in subprocess ", file=sys.stderr)
     result, exitcode, timed_out = forked_subprocess(
-        run_subprocess, (item,), timeout, mem_limit
+        run_subprocess, (item,), timeout, mem_limit, cpu_limit
     )
     cap.deactivate_fixture()
     cap.suspend_global_capture(in_=False)
     out, err = cap.read_global_capture()
 
+    warnings_captured = None
+
     # The result might be an exception, that comes
     # form current process
     if result and not isinstance(result, BaseException):
         # The result came from child process
-        result, warnings_caputred = result
+        result, warnings_captured = result
 
     if result and not isinstance(result, BaseException):
         results: List[pytest.TestReport] = []
@@ -308,9 +338,9 @@ def run_in_subprocess(
         results[-1].sections.append(("Captured stderr", err))
         results[-1].sections.append(("Captured stdout", out))
 
-        if warnings_caputred:
+        if warnings_captured:
             try:
-                for warning_message in warnings_caputred:
+                for warning_message in warnings_captured:
                     item.ihook.pytest_warning_recorded.call_historic(
                         kwargs=dict(
                             warning_message=warning_message,
@@ -343,10 +373,12 @@ def report_process_crash(
 
     if timed_out is not None:
         info += f"Timeout > {timed_out}"
+    elif exitcode == -24:
+        info += "SIGXCPU: CPU time limit exceeded"
     elif exitcode != 0:
-        info += f"Running the test CRASHED with exit code {exitcode}"
+        info += f"Crashed with exit code {exitcode}"
     else:
-        info += "Exited with no result, probably hit memory limit"
+        info += "Exited with no result, memory limit exceeded (probably)"
 
     call = runner.CallInfo.from_call(lambda: 0 / 0, "???")
     call.excinfo = info
@@ -421,19 +453,87 @@ def pytest_runtest_protocol(item):
         return
     if item.config.pluginmanager.get_plugin("timeout"):
         return
+    isolate, timeout, mem_limit, cpu_limit = get_isolation_options(item)
 
-    isolate, timeout, mem_limit = get_isolation_options(item)
-
-    if isolate is not None or mem_limit is not None or timeout is not None:
+    if (
+        isolate is not None
+        or mem_limit is not None
+        or timeout is not None
+        or cpu_limit is not None
+    ):
         ihook = item.ihook
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
-        reports = run_in_subprocess(item, timeout, mem_limit)
+        reports = run_in_subprocess(item, timeout, mem_limit, cpu_limit)
 
         for rep in reports:
             ihook.pytest_runtest_logreport(report=rep)
         ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
 
         return True
+
+
+def get_timeout(item):
+    # Should we timeout?
+    timeout = get_global_value(item, "timeout")
+    timeout_marker = get_marker(item, "timeout", "timeout", 0)
+
+    isolate_timeout = get_global_value(item, "isolate_timeout")
+    isolate_timeout_marker = get_marker(item, "isolate", "timeout", 0)
+
+    if isolate_timeout_marker is not None:
+        timeout = isolate_timeout_marker
+    elif timeout_marker is not None:
+        timeout = timeout_marker
+    elif isolate_timeout is not None:
+        timeout = isolate_timeout
+
+    try:
+        timeout = float(timeout)
+    except (ValueError, TypeError):
+        timeout = None
+    return timeout
+
+
+def get_memory_limit(item):
+    # Should we limit memory?
+    mem_limit = None
+    isolate_mem_limit_marker = get_marker(item, "isolate", "mem_limit", 1)
+    isolate_mem_limit = get_global_value(item, "isolate_mem_limit")
+
+    if isolate_mem_limit_marker is not None:
+        mem_limit = isolate_mem_limit_marker
+    else:
+        mem_limit = isolate_mem_limit
+
+    try:
+        mem_limit = int(mem_limit)
+        if mem_limit < 1 or round(mem_limit) != mem_limit:
+            raise ValueError("Memory limit must be in whole bytes")
+        mem_limit = int(mem_limit)
+    except (ValueError, TypeError):
+        mem_limit = None
+    return mem_limit
+
+
+def get_cpu_limit(item):
+    # Should we limit cpu?
+    cpu_limit = None
+    isolate_cpu_limit_marker = get_marker(item, "isolate", "cpu_limit", 2)
+    isolate_cpu_limit = get_global_value(item, "isolate_cpu_limit")
+
+    if isolate_cpu_limit_marker is not None:
+        cpu_limit = isolate_cpu_limit_marker
+    else:
+        cpu_limit = isolate_cpu_limit
+
+    try:
+        cpu_limit = float(cpu_limit)
+        if cpu_limit < 1 or round(cpu_limit) != cpu_limit:
+            raise ValueError("Cpu limit must be in whole seconds")
+        cpu_limit = int(cpu_limit)
+    except (ValueError, TypeError):
+        cpu_limit = None
+    return cpu_limit
 
 
 def get_isolation_options(item):
@@ -450,31 +550,42 @@ def get_isolation_options(item):
         pass
     else:
         isolate = forked
+    timeout = get_timeout(item)
+    mem_limit = get_memory_limit(item)
+    cpu_limit = get_cpu_limit(item)
 
-    # Should we timeout
-    timeout = get_global_value(item, "timeout")
-    timeout_marker = get_marker(item, "timeout", "timeout", 0)
+    return isolate, timeout, mem_limit, cpu_limit
 
-    isolate_timeout = get_global_value(item, "isolate_timeout")
-    isolate_timeout_marker = get_marker(item, "isolate", "timeout", 0)
 
-    if isolate_timeout_marker is not None:
-        timeout = isolate_timeout_marker
-    elif timeout_marker is not None:
-        timeout = timeout_marker
-    elif isolate_timeout is not None:
-        timeout = isolate_timeout
-
-    if timeout and isinstance(timeout, str) and str.isnumeric(timeout):
-        timeout = float(timeout)
-
-    # Should we memlimit?
-    mem_limit = None
-    isolate_mem_limit_marker = get_marker(item, "isolate", "mem_limit", 1)
-    isolate_mem_limit = get_global_value(item, "isolate_mem_limit")
-
-    if isolate_mem_limit_marker is not None:
-        mem_limit = isolate_mem_limit_marker
+@pytest.hookimpl(tryfirst=True)
+def pytest_terminal_summary(terminalreporter) -> None:
+    durations = terminalreporter.config.option.durations
+    durations_min = terminalreporter.config.option.durations_min
+    verbose = terminalreporter.config.getvalue("verbose")
+    if durations is None:
+        return
+    tr = terminalreporter
+    dlist = []
+    for replist in tr.stats.values():
+        for rep in replist:
+            if hasattr(rep, "cpu_usage"):
+                dlist.append(rep)
+    if not dlist:
+        return
+    dlist.sort(key=lambda x: x.cpu_usage, reverse=True)  # type: ignore[no-any-return]
+    if not durations:
+        tr.write_sep("=", "highest cpu_usage")
     else:
-        mem_limit = isolate_mem_limit
-    return isolate, timeout, mem_limit
+        tr.write_sep("=", "highest %s cpu_usage" % durations)
+        dlist = dlist[:durations]
+
+    for i, rep in enumerate(dlist):
+        if verbose < 2 and rep.cpu_usage < durations_min:
+            tr.write_line("")
+            tr.write_line(
+                "(%s cpu_usage < %gs hidden.  Use -vv to show these durations.)"
+                % (len(dlist) - i, durations_min)
+            )
+            break
+        if rep.when == "teardown":
+            tr.write_line(f"{rep.cpu_usage:02.2f}s {rep.nodeid}")

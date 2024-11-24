@@ -36,9 +36,9 @@ To run every test in its own **forked** subprocess.
 
 Or:
 
-    pytest --isolate-timeout 10 --isolate-mem-limit 1000000
+    pytest --isolate-timeout 10 --isolate-mem-limit 1000000 --isolate-cpu-limit 10
 
-To set a timeout to every test in addition to forking.
+To set a timeout to every test in addition to forking, and limit to 10 cpu seconds.
 
 > Note:
 >
@@ -51,10 +51,10 @@ they will take precedence. Uninstall them to use `pytest-isolate`.
 
 Unlike `pytest-timeout`, timeout in `pytest-isolate` is implemented by forking the test to a separate subprocess, and setting timeout for that subprocess.
 
-You can also use a mark to isolate or time limit the memory test:
+You can also use a mark to isolate or time limit the memory and/or cpu usage test:
 
 ```python
-@pytest.mark.isolate(timeout=10,mem_limit=10**6)
+@pytest.mark.isolate(timeout=10, mem_limit=10**6, cpu_limit=10)
 def test_something():
     pass
 ```
@@ -65,6 +65,7 @@ The options can also be set in an pytest configuration file, e.g:
 [tool.pytest.ini_options]
 isolate_timeout=10
 isolate_mem_limit=1000000
+isolate_cpu_limit=10
 ```
 
 ## Contributing
