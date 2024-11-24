@@ -4,14 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-isolate"
-description = ''
+description = 'Run pytest tests in isolated subprocesses'
 readme = "README.md"
 requires-python = ">=3.7"
 license = "MIT"
 keywords = []
-authors = [
-  { name = "gilfree", email = "gilfree@users.noreply.github.com" },
-]
+authors = [{ name = "gilfree", email = "gilfree@users.noreply.github.com" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
@@ -23,7 +21,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["dill","tblib","pytest"]
+dependencies = ["dill", "tblib", "pytest"]
 dynamic = ["version"]
 
 [project.urls]
@@ -38,22 +36,26 @@ pytest_isolate = "pytest_isolate.plugin"
 path = "src/pytest_isolate/__about__.py"
 
 [tool.hatch.envs.default]
-dependencies = [
-  "pytest",
-  "pytest-cov",
-]
+dependencies = ["pytest", "pytest-cov", "numpy", "pytest-xdist"]
+
+
+[tool.pytest.ini_options]
+isolate_timeout = 2
 
 [tool.ruff]
-# Enable Pyflakes `E` and `F` codes by default.
-select = ["E", "F","I"]
-ignore = []
-fix=true
-# Allow unused variables when underscore-prefixed.
-dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+fix = true
 
 # Assume Python 3.11.
 target-version = "py311"
 
-[tool.ruff.mccabe]
+[tool.ruff.lint]
+# Enable Pyflakes `E` and `F` codes by default.
+select = ["E", "F", "I"]
+ignore = []
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+
+[tool.ruff.lint.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
 max-complexity = 10
