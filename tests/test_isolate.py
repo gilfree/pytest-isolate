@@ -74,7 +74,12 @@ def test_warn():
 @pytest.mark.isolate(cpu_limit=1)
 def test_isolate_cpu():
     import numpy as np
+
     # hog CPU:
-    x=0
+    x = 0
     for i in range(100):
-        x+=(np.random.rand(1000,1000)@np.random.rand(1000,1000)).sum()
+        x += (np.random.rand(1000, 1000) @ np.random.rand(1000, 1000)).sum()
+
+def test_slow():
+    sleep(0.1)
+    pass

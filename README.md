@@ -15,8 +15,10 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 * Captures stdout & stderr of crashing processes
 * Add Timeout to a forked test
 * Limit memory used by test
+* Limit CPU time used by test
 * Plays nice with pytest-xdist
 * Shows warnings, even with xdist!
+* *Create visual timeline of test execution (isolated or not)*
 
 ## Requirements
 
@@ -39,6 +41,13 @@ Or:
     pytest --isolate-timeout 10 --isolate-mem-limit 1000000 --isolate-cpu-limit 10
 
 To set a timeout to every test in addition to forking, and limit to 10 cpu seconds.
+
+Or:
+
+    pytest --timeline
+
+With possible combination of the above, to generate a timeline of test execution. The
+timeline can be viewed in chrome://tracing.
 
 > Note:
 >

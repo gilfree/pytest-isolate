@@ -1,12 +1,13 @@
 # This file is was originally based on pytest forked:
 # see: https://github.com/pytest-dev/pytest-forked/blob/master/src/pytest_forked/__init__.py
-# Since pytest forked is un unmaintained I decided to make my 
+# Since pytest forked is un unmaintained I decided to make my
 # changes in a different project
 # Please see README.md
 
 
 import fcntl
 import io
+import json
 import multiprocessing as mp
 import os
 import resource
@@ -28,7 +29,7 @@ except ImportError:
     pass
 
 try:
-    import setproctitle # noqa F401
+    import setproctitle  # noqa F401
 except ImportError:
     pass
 
@@ -207,6 +208,21 @@ def pytest_addoption(parser):
     )
     parser.addini(
         "isolate_cpu_limit", "Default cpu limit for isolated tests", type="string"
+    )
+
+    parser.addoption(
+        "--timeline",
+        dest="timeline",
+        action="store_true",
+        default=False,
+        help="Report test timelines",
+    )
+
+    parser.addoption(
+        "--timeline-file",
+        dest="timeline_file",
+        default="./timeline.json",
+        help="Path to the timeline file",
     )
 
 
@@ -558,34 +574,84 @@ def get_isolation_options(item):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_terminal_summary(terminalreporter) -> None:
+def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     durations = terminalreporter.config.option.durations
     durations_min = terminalreporter.config.option.durations_min
     verbose = terminalreporter.config.getvalue("verbose")
-    if durations is None:
-        return
     tr = terminalreporter
-    dlist = []
-    for replist in tr.stats.values():
-        for rep in replist:
-            if hasattr(rep, "cpu_usage"):
-                dlist.append(rep)
-    if not dlist:
-        return
-    dlist.sort(key=lambda x: x.cpu_usage, reverse=True)  # type: ignore[no-any-return]
-    if not durations:
-        tr.write_sep("=", "highest cpu_usage")
-    else:
-        tr.write_sep("=", "highest %s cpu_usage" % durations)
-        dlist = dlist[:durations]
+    if durations is not None:
+        dlist = []
+        for replist in tr.stats.values():
+            for rep in replist:
+                if hasattr(rep, "cpu_usage"):
+                    dlist.append(rep)
+        if not dlist:
+            return
+        dlist.sort(key=lambda x: x.cpu_usage, reverse=True)  # type: ignore[no-any-return]
+        if not durations:
+            tr.write_sep("=", "highest cpu_usage")
+        else:
+            tr.write_sep("=", "highest %s cpu_usage" % durations)
+            dlist = dlist[:durations]
 
-    for i, rep in enumerate(dlist):
-        if verbose < 2 and rep.cpu_usage < durations_min:
-            tr.write_line("")
-            tr.write_line(
-                "(%s cpu_usage < %gs hidden.  Use -vv to show these durations.)"
-                % (len(dlist) - i, durations_min)
-            )
-            break
-        if rep.when == "teardown":
-            tr.write_line(f"{rep.cpu_usage:02.2f}s {rep.nodeid}")
+        for i, rep in enumerate(dlist):
+            if verbose < 2 and rep.cpu_usage < durations_min:
+                tr.write_line("")
+                tr.write_line(
+                    "(%s cpu_usage < %gs hidden.  Use -vv to show these durations.)"
+                    % (len(dlist) - i, durations_min)
+                )
+                break
+            if rep.when == "teardown":
+                tr.write_line(f"{rep.cpu_usage:02.2f}s {rep.nodeid}")
+
+    if config.getoption("timeline"):
+        events = []
+        for replist in tr.stats.values():
+            rep: pytest.TestReport
+
+            for rep in replist:
+                if not isinstance(rep, pytest.TestReport) or rep.when != "call":
+                    continue
+                props = dict(getattr(rep, "user_properties", ()))
+                events.extend(
+                    create_event(
+                        props.get("worker_id", "master"),
+                        rep.nodeid,
+                        rep.outcome,
+                        rep.start,
+                        rep.stop,
+                    )
+                )
+        filename = config.getoption("timeline_file")
+        os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
+        json.dump(events, open(filename, "w"))
+
+
+@pytest.hookimpl(tryfirst=False, hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item):
+    yield
+    item.user_properties.append(
+        ("worker_id", os.getenv("PYTEST_XDIST_WORKER", "master"))
+    )
+
+
+def create_event(worker_name, test_name, category, start_time, end_time, **kwargs):
+    start_event = {
+        "name": test_name.rsplit("/")[-1],
+        "cat": category,
+        "ph": "B",
+        "pid": worker_name,
+        "tid": 0,
+        "ts": start_time * (1000**2),
+        "args": kwargs,
+    }
+    end_event = {
+        "name": test_name.rsplit("/")[-1],
+        "cat": "pipeline",
+        "ph": "E",
+        "pid": worker_name,
+        "tid": 0,
+        "ts": end_time * (1000**2),
+    }
+    return start_event, end_event
