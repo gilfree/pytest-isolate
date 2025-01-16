@@ -225,6 +225,8 @@ def pytest_addoption(parser):
         help="Path to the timeline file",
     )
 
+    parser.addini("timeline_file", "timeline file", type="string")
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config):

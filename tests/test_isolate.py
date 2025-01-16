@@ -80,6 +80,7 @@ def test_isolate_cpu():
     for i in range(100):
         x += (np.random.rand(1000, 1000) @ np.random.rand(1000, 1000)).sum()
 
+
 def test_slow():
     sleep(0.1)
     pass
