@@ -42,9 +42,9 @@ except ImportError:
 
 
 def forked_subprocess(
-    target, args=(), timeout=None, memlimt=None, cpulimit=None
+    target, args=(), timeout=None, memlimt=None, cpulimit=None, wait_delta=0.05
 ) -> Tuple[Any, int, bool]:
-    sub = ForkedSubprocess()
+    sub = ForkedSubprocess(wait_delta=wait_delta)
     exitcode, timed_out, result = sub.run_in_subprocess(
         timeout, memlimt, cpulimit, target, args
     )
@@ -73,7 +73,8 @@ def limits(max_mem, max_cpu):
 
 
 class ForkedSubprocess:
-    def __init__(self) -> None:
+    def __init__(self, wait_delta=0.05) -> None:
+        self.wait_delta = wait_delta
         self.r_out, self.w_out = os.pipe()
         self.r_err, self.w_err = os.pipe()
         fcntl.fcntl(self.r_err, fcntl.F_SETFL, os.O_NONBLOCK)
@@ -123,16 +124,17 @@ class ForkedSubprocess:
         p = ctx.Process(target=run_subprocess)
         p.start()
         self.parent_open_streams()
-        time_left = timeout or 1
+        delta = self.wait_delta
+        time_left = timeout or delta
         result = None
         while time_left > 0:
             try:
-                result = dill.loads(q.get(block=True, timeout=min(1, time_left)))
+                result = dill.loads(q.get(block=True, timeout=min(delta, time_left)))
             except Empty:
                 if not p.is_alive():
                     break
                 if timeout is not None:
-                    time_left = time_left - 1
+                    time_left = time_left - delta
             except Exception as e:
                 result = e
                 break
@@ -209,7 +211,12 @@ def pytest_addoption(parser):
     parser.addini(
         "isolate_cpu_limit", "Default cpu limit for isolated tests", type="string"
     )
-
+    parser.addini(
+        "wait_delta",
+        "Delta between subprocess queue pollings",
+        type="string",
+        default="0.05",
+    )
     parser.addoption(
         "--timeline",
         dest="timeline",
@@ -324,13 +331,14 @@ def run_in_subprocess(
     timeout: Optional[float],
     mem_limit: Optional[int],
     cpu_limit: Optional[int],
+    wait_delta: float,
 ) -> List[pytest.TestReport]:
     cap = item.config.pluginmanager.getplugin("capturemanager")
     assert isinstance(cap, _pytest.capture.CaptureManager)
     cap.resume_global_capture()
     cap.activate_fixture()
     result, exitcode, timed_out = forked_subprocess(
-        run_subprocess, (item,), timeout, mem_limit, cpu_limit
+        run_subprocess, (item,), timeout, mem_limit, cpu_limit, wait_delta
     )
     cap.deactivate_fixture()
     cap.suspend_global_capture(in_=False)
@@ -414,7 +422,7 @@ def report_process_crash(
     reason = xfail_marker.kwargs.get("reason", "")
     rep.wasxfail = ""
     if reason:
-        rep.wasxfail = f"reason: {xfail_marker.kwargs.get('reason','')}; "
+        rep.wasxfail = f"reason: {xfail_marker.kwargs.get('reason', '')}; "
     rep.wasxfail += f"pytest-isolate reason: {call.excinfo}"
 
     warnings.warn(
@@ -466,12 +474,14 @@ def get_marker(item, marker_name, argname=None, pos=None):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_runtest_protocol(item):
+def pytest_runtest_protocol(item: pytest.Item):
     if item.config.pluginmanager.get_plugin("forked"):
         return
     if item.config.pluginmanager.get_plugin("timeout"):
         return
     isolate, timeout, mem_limit, cpu_limit = get_isolation_options(item)
+
+    wait_delta = float(item.config.getini("wait_delta"))  # type: ignore
 
     if (
         isolate is not None
@@ -481,7 +491,7 @@ def pytest_runtest_protocol(item):
     ):
         ihook = item.ihook
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
-        reports = run_in_subprocess(item, timeout, mem_limit, cpu_limit)
+        reports = run_in_subprocess(item, timeout, mem_limit, cpu_limit, wait_delta)
 
         for rep in reports:
             ihook.pytest_runtest_logreport(report=rep)
