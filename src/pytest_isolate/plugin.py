@@ -40,13 +40,50 @@ try:
 except ImportError:
     pass
 
+from pytest_isolate.resource_management import (
+    clean_resources,
+    cleanup_resource_environment,
+    parse_resource_list,
+    register_resource_provider,
+    setup_resource_environment,
+)
+
+
+def get_available_gpus() -> List[int]:
+    # Check if CUDA_VISIBLE_DEVICES is already set
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cuda_visible_devices is not None:
+        return parse_resource_list(cuda_visible_devices)
+
+    # If not set and pynvml is available, get all GPUs
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        resources = list(range(count))
+        pynvml.nvmlShutdown()
+        return resources
+    except Exception:
+        warnings.warn("Failed to get GPU count using pynvml", RuntimeWarning)
+
+    return []
+
 
 def forked_subprocess(
-    target, args=(), timeout=None, memlimt=None, cpulimit=None, wait_delta=0.05
+    target,
+    args=(),
+    timeout=None,
+    memlimt=None,
+    cpulimit=None,
+    wait_delta=0.05,
+    resource_dict=None,
+    test_id=None,
+    resource_timeout=None,
 ) -> Tuple[Any, int, bool]:
     sub = ForkedSubprocess(wait_delta=wait_delta)
     exitcode, timed_out, result = sub.run_in_subprocess(
-        timeout, memlimt, cpulimit, target, args
+        timeout, memlimt, cpulimit, resource_dict, test_id, resource_timeout, target, args
     )
     return result, exitcode, timed_out
 
@@ -104,7 +141,17 @@ class ForkedSubprocess:
         os.close(self.w_out)
         os.close(self.w_err)
 
-    def run_in_subprocess(self, timeout, memlimit, cpulimit, target, args=()):
+    def run_in_subprocess(
+        self,
+        timeout,
+        memlimit,
+        cpulimit,
+        resource_dict,
+        test_id,
+        resource_timeout,
+        target,
+        args=(),
+    ):
         ctx = mp.get_context("fork")
         q = ctx.Queue()
         timed_out = None
@@ -114,7 +161,8 @@ class ForkedSubprocess:
             self.child_redirect_streams()
             try:
                 with limits(memlimit, cpulimit):
-                    q.put(dill.dumps(target(*args)))
+                    with allocate_resources(resource_dict, test_id, resource_timeout):
+                        q.put(dill.dumps(target(*args)))
             except BaseException as e:
                 q.put(dill.dumps(e))
             sys.stdout.flush()
@@ -165,7 +213,7 @@ def pytest_load_initial_conftests(early_config, parser, args):
     )
     early_config.addinivalue_line(
         "markers",
-        "isolate: Always isolate this test.",
+        "isolate: Always isolate this test, possibly with resources.",
     )
     early_config.addinivalue_line(
         "markers",
@@ -217,6 +265,12 @@ def pytest_addoption(parser):
         type="string",
         default="0.05",
     )
+    parser.addini(
+        "resource_timeout",
+        "Timeout for resource allocation",
+        type="string",
+        default="300",
+    )
     parser.addoption(
         "--timeline",
         dest="timeline",
@@ -233,6 +287,7 @@ def pytest_addoption(parser):
     )
 
     parser.addini("timeline_file", "timeline file", type="string")
+
 
 
 @pytest.hookimpl(trylast=True)
@@ -260,6 +315,8 @@ def pytest_configure(config):
             "markers",
             "timeout: Run this tests in a separate, forked, process with timeout",
         )
+    clean_resources()
+    register_resource_provider("gpu", "CUDA_VISIBLE_DEVICES", get_available_gpus)
 
 
 # Taken from pytest 7.2:
@@ -321,9 +378,30 @@ def run_subprocess(item: pytest.Item):
                     config=item.config, report=report
                 )
             )
+
         return s_reports, warnings
     except BaseException as e:
         return e, None
+
+
+@contextmanager
+def allocate_resources(resource_dict, test_id, timeout):
+    resource_dict = resource_dict or {}
+    allocated_resources = {}
+    for resource_type, count in resource_dict.items():
+        # Allocate resources
+        resource_ids = setup_resource_environment(
+            test_id=f"{test_id}_{resource_type}",
+            count=count,
+            resource_type=resource_type,
+            wait_timeout=timeout,
+        )
+        allocated_resources[resource_type] = resource_ids
+    try:
+        yield allocated_resources
+    finally:
+        for res_type, _ in allocated_resources.items():
+            cleanup_resource_environment(f"{test_id}_{res_type}", res_type)
 
 
 def run_in_subprocess(
@@ -337,8 +415,19 @@ def run_in_subprocess(
     assert isinstance(cap, _pytest.capture.CaptureManager)
     cap.resume_global_capture()
     cap.activate_fixture()
+    resource_dict = get_resource_dict(item)
+    test_id = f"{item.nodeid}"
+    resource_timeout = float(item.config.getini("resource_timeout"))  # type: ignore
     result, exitcode, timed_out = forked_subprocess(
-        run_subprocess, (item,), timeout, mem_limit, cpu_limit, wait_delta
+        run_subprocess,
+        (item,),
+        timeout,
+        mem_limit,
+        cpu_limit,
+        wait_delta,
+        resource_dict,
+        test_id,
+        resource_timeout,
     )
     cap.deactivate_fixture()
     cap.suspend_global_capture(in_=False)
@@ -473,13 +562,53 @@ def get_marker(item, marker_name, argname=None, pos=None):
     return marker
 
 
+def get_resource_dict(item):
+    """
+    Get resource requirements from the resources parameter of the isolate marker.
+
+    Example: @pytest.mark.isolate(resources={'gpu': 2})
+    """
+    resources = {}
+    isolate_marker = item.get_closest_marker("isolate")
+
+    if isolate_marker is not None and "resources" in isolate_marker.kwargs:
+        resources_param = isolate_marker.kwargs.get("resources", {})
+
+        # Ensure the resources parameter is a dictionary
+        if not isinstance(resources_param, dict):
+            warnings.warn(
+                f"Invalid resources parameter {resources_param}. Must be a dictionary.",
+                RuntimeWarning,
+            )
+            return resources
+
+        # Process each resource requirement
+        for resource_type, count in resources_param.items():
+            try:
+                count = int(count)
+                if count < 0:
+                    warnings.warn(
+                        f"Invalid {resource_type} count: {count}. Must be >= 0.",
+                        RuntimeWarning,
+                    )
+                    continue
+                resources[resource_type] = count
+            except (ValueError, TypeError):
+                warnings.warn(
+                    f"Invalid {resource_type} count: {count}. Must be an integer.",
+                    RuntimeWarning,
+                )
+
+    return resources
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item: pytest.Item):
     if item.config.pluginmanager.get_plugin("forked"):
         return
     if item.config.pluginmanager.get_plugin("timeout"):
         return
-    isolate, timeout, mem_limit, cpu_limit = get_isolation_options(item)
+    isolate, timeout, mem_limit, cpu_limit, resource_reqs = get_isolation_options(item)
 
     wait_delta = float(item.config.getini("wait_delta"))  # type: ignore
 
@@ -488,6 +617,7 @@ def pytest_runtest_protocol(item: pytest.Item):
         or mem_limit is not None
         or timeout is not None
         or cpu_limit is not None
+        or resource_reqs
     ):
         ihook = item.ihook
         ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
@@ -578,11 +708,19 @@ def get_isolation_options(item):
         pass
     else:
         isolate = forked
+
     timeout = get_timeout(item)
     mem_limit = get_memory_limit(item)
     cpu_limit = get_cpu_limit(item)
 
-    return isolate, timeout, mem_limit, cpu_limit
+    # Get resources from isolate(resources={'gpu': 2}) syntax
+    resource_dict = get_resource_dict(item)
+
+    # If resources are requested, ensure isolation
+    if resource_dict and not isolate:
+        isolate = True
+
+    return isolate, timeout, mem_limit, cpu_limit, resource_dict
 
 
 @pytest.hookimpl(tryfirst=True)
