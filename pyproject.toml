@@ -20,8 +20,11 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["dill", "tblib", "pytest"]
+dependencies = ["dill", "tblib", "pytest","filelock"]
 dynamic = ["version"]
+
+[project.optional-dependencies]
+gpu = ["pynvml"]
 
 [project.urls]
 Documentation = "https://github.com/gilfree/pytest-isolate#readme"

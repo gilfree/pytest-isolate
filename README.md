@@ -16,6 +16,7 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 * Add Timeout to a forked test
 * Limit memory used by test
 * Limit CPU time used by test
+* Manage GPU resources with CUDA_VISIBLE_DEVICES
 * Plays nice with pytest-xdist
 * Shows warnings, even with xdist!
 * *Create visual timeline of test execution (isolated or not)*
@@ -24,11 +25,21 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 
 * pytest
 
+### Optional Dependencies
+
+For GPU resource management:
+
+* pynvml (optional, for automatic GPU detection)
+
 ## Installation
 
 You can install "pytest-isolate" via `pip` from `PyPI`
 
     pip install pytest-isolate
+
+For GPU resource management support:
+
+    pip install pytest-isolate[gpu]
 
 ## Usage
 
@@ -60,7 +71,9 @@ they will take precedence. Uninstall them to use `pytest-isolate`.
 
 Unlike `pytest-timeout`, timeout in `pytest-isolate` is implemented by forking the test to a separate subprocess, and setting timeout for that subprocess.
 
-You can also use a mark to isolate or time limit the memory and/or cpu usage test:
+### Using the isolate marker
+
+You can use a mark to isolate or time limit the memory and/or cpu usage test:
 
 ```python
 @pytest.mark.isolate(timeout=10, mem_limit=10**6, cpu_limit=10)
@@ -68,7 +81,19 @@ def test_something():
     pass
 ```
 
-The options can also be set in an pytest configuration file, e.g:
+The `isolate` marker can also be used to request gpus for a test on a gpu machine:
+
+```python
+# Request 2 GPUs for this test
+@pytest.mark.isolate(resources={'gpu': 2})
+def test_with_gpus():
+    # The test will have CUDA_VISIBLE_DEVICES set to the allocated GPU IDs
+    assert len(os.environ.get("CUDA_VISIBLE_DEVICES").split(",")) == 2
+```
+
+### Configuration Options
+
+The options can be set in an pytest configuration file, e.g:
 
 ```toml
 [tool.pytest.ini_options]
@@ -76,6 +101,15 @@ isolate_timeout=10
 isolate_mem_limit=1000000
 isolate_cpu_limit=10
 ```
+
+## CUDA_VISIBLE_DEVICES Handling
+
+If `CUDA_VISIBLE_DEVICES` is already set when pytest starts, the plugin will respect this setting and only allocate from the GPUs specified there. This works even without pynvml installed.
+
+For example:
+
+* If `CUDA_VISIBLE_DEVICES=0,1,2` is set, tests will only use GPUs 0, 1, and 2.
+* If `CUDA_VISIBLE_DEVICES=` is set (empty), no GPUs will be used.
 
 ## Contributing
 
