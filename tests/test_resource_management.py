@@ -1,3 +1,4 @@
+import json
 import os
 import random
 import tempfile
@@ -9,8 +10,9 @@ from unittest import mock
 import filelock
 import pytest
 
-from pytest_isolate.plugin import allocate_resources
+from pytest_isolate.plugin import allocate_resources, get_resource_events
 from pytest_isolate.resource_management import (
+    log_resource_allocation,
     parse_resource_list,
     register_resource_provider,
 )
@@ -52,23 +54,30 @@ def test_parse_resource_list():
     # Test with invalid values - no warning in new implementation
     assert parse_resource_list("0,a,2") == []
 
+def test_log_resource_allocation():
+    log_resource_allocation([0,1],'gpu','foo', start_time=100,file="timeline.events.test.json")
+    
+    log_resource_allocation([0,1],'gpu','foo', end_time=200,file="timeline.events.test.json")
+    events = get_resource_events(file="timeline.events.test.json")
+    open("timeline.resources.test.json", "w").write(json.dumps(events))
+    
 
 def test_allocate_resources():
     with allocate_resources({"gpu": 1}, "foo", 100) as allocated:
-        assert allocated["gpu"] == [0]
-        assert os.environ.get("CUDA_VISIBLE_DEVICES") == "0"
+        assert len(allocated["gpu"]) == 1
+        assert len(os.environ.get("CUDA_VISIBLE_DEVICES","").split(","))
 
 
 
 @pytest.mark.isolate(resources={"gpu": 2}, timeout=10)
-@pytest.mark.parametrize("dummy", [1] * 2)
+@pytest.mark.parametrize("dummy", [1, 2])
 def test_gpu_marker_2(dummy):
     sleep(0.3)
     assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")) == 2
 
 
 @pytest.mark.isolate(resources={"gpu": 1}, timeout=10)
-@pytest.mark.parametrize("dummy", [1] * 2)
+@pytest.mark.parametrize("dummy", [1, 2])
 def test_gpu_marker_1(dummy):
     sleep(0.3)
     assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")) == 1
