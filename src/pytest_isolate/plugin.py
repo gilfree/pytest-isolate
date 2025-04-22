@@ -40,7 +40,6 @@ try:
 except ImportError:
     pass
 
-from pytest_isolate.tracing import create_event
 from pytest_isolate.resource_management import (
     clean_resources,
     cleanup_resource_environment,
@@ -49,6 +48,7 @@ from pytest_isolate.resource_management import (
     register_resource_provider,
     setup_resource_environment,
 )
+from pytest_isolate.tracing import create_event
 
 
 def get_available_gpus() -> List[int]:
@@ -85,7 +85,14 @@ def forked_subprocess(
 ) -> Tuple[Any, int, bool]:
     sub = ForkedSubprocess(wait_delta=wait_delta)
     exitcode, timed_out, result = sub.run_in_subprocess(
-        timeout, memlimt, cpulimit, resource_dict, test_id, resource_timeout, target, args
+        timeout,
+        memlimt,
+        cpulimit,
+        resource_dict,
+        test_id,
+        resource_timeout,
+        target,
+        args,
     )
     return result, exitcode, timed_out
 
@@ -289,7 +296,6 @@ def pytest_addoption(parser):
     )
 
     parser.addini("timeline_file", "timeline file", type="string")
-
 
 
 @pytest.hookimpl(trylast=True)
@@ -778,8 +784,9 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         filename = config.getoption("timeline_file")
         os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
         json.dump(events, open(filename, "w"))
-        filename= filename.replace('.json', '.resources.json')
+        filename = filename.replace(".json", ".resources.json")
         json.dump(get_resource_events(), open(filename, "w"))
+
 
 @pytest.hookimpl(tryfirst=False, hookwrapper=True)
 def pytest_runtest_call(item: pytest.Item):
@@ -787,5 +794,3 @@ def pytest_runtest_call(item: pytest.Item):
     item.user_properties.append(
         ("worker_id", os.getenv("PYTEST_XDIST_WORKER", "master"))
     )
-
-
