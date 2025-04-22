@@ -323,8 +323,10 @@ def pytest_configure(config):
             "markers",
             "timeout: Run this tests in a separate, forked, process with timeout",
         )
-    clean_resources()
-    register_resource_provider("gpu", "CUDA_VISIBLE_DEVICES", get_available_gpus)
+    
+    if os.getenv("PYTEST_XDIST_WORKER") is None:
+        clean_resources()
+        register_resource_provider("gpu", "CUDA_VISIBLE_DEVICES", get_available_gpus)
 
 
 # Taken from pytest 7.2:
