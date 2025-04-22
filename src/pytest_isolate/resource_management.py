@@ -15,15 +15,21 @@ from pytest_isolate.tracing import create_event
 
 # Constants
 
-DEFAULT_STATE_FILE = Path(tempfile.gettempdir()) / "pytest_isolate_resources.json"
+DEFAULT_STATE_FILE = (
+    Path(os.environ.get("PYTEST_ISOLATE_STATE_FOLDER", tempfile.gettempdir()))
+    / "pytest_isolate_resources.json"
+)
 DEFAULT_EVENTS_FILE = Path(str(DEFAULT_STATE_FILE).replace(".json", "_events.json"))
+POLL_INTERVAL = float(os.environ.get("PYTEST_ISOLATE_POLL_INTERVAL", 0.1))
+DEFAULT_LOCK_TIMEOUT = int(os.environ.get("PYTEST_ISOLATE_LOCK_TIMEOUT", 5))
 DEFAULT_WAIT_TIMEOUT = 300  # 5 minutes
-POLL_INTERVAL = 0.1  # 1 second
 
 
 @contextmanager
 def lock_resource_file():
-    with filelock.FileLock(str(DEFAULT_STATE_FILE) + ".lock", timeout=4) as lock:
+    with filelock.FileLock(
+        str(DEFAULT_STATE_FILE) + ".lock", timeout=DEFAULT_LOCK_TIMEOUT
+    ) as lock:
         yield lock
 
 

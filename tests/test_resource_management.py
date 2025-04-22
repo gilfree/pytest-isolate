@@ -1,20 +1,16 @@
 import json
 import os
-import random
 import tempfile
-from importlib import resources
 from pathlib import Path
 from time import sleep
 from unittest import mock
 
-import filelock
 import pytest
 
 from pytest_isolate.plugin import allocate_resources, get_resource_events
 from pytest_isolate.resource_management import (
     log_resource_allocation,
     parse_resource_list,
-    register_resource_provider,
 )
 
 
@@ -54,19 +50,23 @@ def test_parse_resource_list():
     # Test with invalid values - no warning in new implementation
     assert parse_resource_list("0,a,2") == []
 
+
 def test_log_resource_allocation():
-    log_resource_allocation([0,1],'gpu','foo', start_time=100,file="timeline.events.test.json")
-    
-    log_resource_allocation([0,1],'gpu','foo', end_time=200,file="timeline.events.test.json")
+    log_resource_allocation(
+        [0, 1], "gpu", "foo", start_time=100, file="timeline.events.test.json"
+    )
+
+    log_resource_allocation(
+        [0, 1], "gpu", "foo", end_time=200, file="timeline.events.test.json"
+    )
     events = get_resource_events(file="timeline.events.test.json")
     open("timeline.resources.test.json", "w").write(json.dumps(events))
-    
+
 
 def test_allocate_resources():
     with allocate_resources({"gpu": 1}, "foo", 100) as allocated:
         assert len(allocated["gpu"]) == 1
-        assert len(os.environ.get("CUDA_VISIBLE_DEVICES","").split(","))
-
+        assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
 
 
 @pytest.mark.isolate(resources={"gpu": 2}, timeout=10)
