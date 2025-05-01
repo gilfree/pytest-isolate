@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import filelock
 
@@ -37,7 +37,7 @@ def lock_resource_file():
 class Resource:
     env_variable: str
     available: List[int]
-    allocated: dict[str, List[int]]
+    allocated: Dict[str, List[int]]
 
     def allocate(self, test_id: str, count: int) -> List[int]:
         """Allocate resources for a test."""
@@ -60,7 +60,7 @@ class Resource:
 
 @dataclass
 class StateData:
-    resources: dict[str, Resource]
+    resources: Dict[str, Resource]
 
     @classmethod
     def get_instance(cls) -> "StateData":
@@ -209,7 +209,7 @@ def cleanup_resource_environment(test_id: str, resource_type: str) -> None:
         state.save()
 
 
-def get_resource_events(file=None) -> list[dict]:
+def get_resource_events(file=None) -> List[dict]:
     # Convert the resource events to the format used in tracing.py,
     # by merging the start and end events.
     file = Path(file or str(DEFAULT_EVENTS_FILE))
