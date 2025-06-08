@@ -19,6 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
+  "Operating System :: POSIX",
 ]
 dependencies = ["dill", "tblib", "pytest","filelock"]
 dynamic = ["version"]

@@ -241,6 +241,13 @@ def pytest_addoption(parser):
         help="Isolate each test in a separate process",
     )
     group.addoption(
+        "--no-isolate",
+        dest="noisolate",
+        action="store_true",
+        default=False,
+        help="Disable this plugin for the current run",
+    )
+    group.addoption(
         "--isolate-timeout",
         dest="isolate_timeout",
         default=None,
@@ -323,7 +330,7 @@ def pytest_configure(config):
             "markers",
             "timeout: Run this tests in a separate, forked, process with timeout",
         )
-    
+
     if os.getenv("PYTEST_XDIST_WORKER") is None:
         clean_resources()
         register_resource_provider("gpu", "CUDA_VISIBLE_DEVICES", get_available_gpus)
@@ -614,6 +621,8 @@ def get_resource_dict(item):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item: pytest.Item):
+    if item.config.getoption("noisolate"):
+        return
     if item.config.pluginmanager.get_plugin("forked"):
         return
     if item.config.pluginmanager.get_plugin("timeout"):
@@ -735,6 +744,12 @@ def get_isolation_options(item):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
+    if terminalreporter.config.getoption("noisolate"):
+        return
+    if terminalreporter.config.pluginmanager.get_plugin("forked"):
+        return
+    if terminalreporter.config.pluginmanager.get_plugin("timeout"):
+        return
     durations = terminalreporter.config.option.durations
     durations_min = terminalreporter.config.option.durations_min or 0
     verbose = terminalreporter.config.getvalue("verbose")
