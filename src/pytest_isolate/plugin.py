@@ -736,7 +736,7 @@ def get_isolation_options(item):
 @pytest.hookimpl(tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     durations = terminalreporter.config.option.durations
-    durations_min = terminalreporter.config.option.durations_min
+    durations_min = terminalreporter.config.option.durations_min or 0
     verbose = terminalreporter.config.getvalue("verbose")
     tr = terminalreporter
     if durations is not None:
