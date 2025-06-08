@@ -31,6 +31,12 @@ For GPU resource management:
 
 * pynvml (optional, for automatic GPU detection)
 
+## Support
+
+* Operating Systems: Linux (tested), macOS (not tested but should work). Windows is not supported,
+  and will probably not work as we are based on process forking.
+* Python Versions: 3.9, 3.10, 3.11, 3.12
+  
 ## Installation
 
 You can install "pytest-isolate" via `pip` from `PyPI`
@@ -60,7 +66,11 @@ Or:
 With possible combination of the above, to generate a timeline of test execution. The
 timeline can be viewed in chrome://tracing.
 
-> Note:
+To disable the pulgin, you can use the `--no-isolate` option:
+
+    pytest --no-isolate
+
+> ***Note:***
 >
 > Since this plugin uses `fork`, it will not work on  operating systems without `fork` support (e.g. Windows).
 
