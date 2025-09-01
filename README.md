@@ -16,7 +16,7 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 * Add Timeout to a forked test
 * Limit memory used by test
 * Limit CPU time used by test
-* Manage GPU resources with CUDA_VISIBLE_DEVICES
+* Manage GPU resources with CUDA_VISIBLE_DEVICES, with support for fractional requests (1/2, 1/4, 1/8, 1/16)
 * Plays nice with pytest-xdist
 * Shows warnings, even with xdist!
 * *Create visual timeline of test execution (isolated or not)*
@@ -99,6 +99,12 @@ The `isolate` marker can also be used to request gpus for a test on a gpu machin
 def test_with_gpus():
     # The test will have CUDA_VISIBLE_DEVICES set to the allocated GPU IDs
     assert len(os.environ.get("CUDA_VISIBLE_DEVICES").split(",")) == 2
+
+# Request 1/2 of a GPU for this test, up to 2 tests that request 1/2 of a GPU will be allocated the same GPU
+@pytest.mark.isolate(resources={'gpu': 1/2})
+def test_with_half_gpu():
+    # The test will have CUDA_VISIBLE_DEVICES set to the allocated GPU IDs
+    assert len(os.environ.get("CUDA_VISIBLE_DEVICES").split(",")) == 1
 ```
 
 ### Configuration Options

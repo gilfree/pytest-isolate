@@ -5,7 +5,7 @@ import time
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -38,24 +38,72 @@ class Resource:
     env_variable: str
     available: List[int]
     allocated: Dict[str, List[int]]
+    resource_usage_count: Dict[int, int] = field(default_factory=dict)
+    test_usage_units: Dict[str, int] = field(default_factory=dict)
+    max_units_per_resource: int = 16  # Maximum units per resource (configurable)
 
-    def allocate(self, test_id: str, count: int) -> List[int]:
+    def allocate(self, test_id: str, count: float) -> List[int]:
         """Allocate resources for a test."""
-        if len(self.available) < count:
+        # Convert to units
+        if count < 1:
+            usage_units = int(count * self.max_units_per_resource)
+            if usage_units <= 0 or self.max_units_per_resource % usage_units != 0:
+                raise ValueError(
+                    f"Fraction {count} does not divide evenly into {self.max_units_per_resource} units"
+                )
+
+            # Fractional: find one resource with enough capacity
+            for resource_id in self.available:
+                current_usage = self.resource_usage_count.get(resource_id, 0)
+                if current_usage + usage_units <= self.max_units_per_resource:
+                    self.resource_usage_count[resource_id] = current_usage + usage_units
+                    self.allocated[test_id] = [resource_id]
+                    self.test_usage_units[test_id] = usage_units
+                    return [resource_id]
             return []
 
-        allocated = self.available[:count]
-        self.allocated[test_id] = allocated
-        self.available = self.available[count:]
-        return allocated
+        else:
+            # Integer: find clean resources and take them exclusively
+            count_int = int(count)
+            usage_units = count_int * self.max_units_per_resource
+
+            available_clean = [
+                rid
+                for rid in self.available
+                if self.resource_usage_count.get(rid, 0) == 0
+            ]
+
+            if len(available_clean) < count_int:
+                return []
+
+            allocated = available_clean[:count_int]
+            self.allocated[test_id] = allocated
+            self.test_usage_units[test_id] = usage_units
+
+            # Remove from available and mark as fully used
+            for resource_id in allocated:
+                self.available.remove(resource_id)
+                self.resource_usage_count[resource_id] = self.max_units_per_resource
+
+            return allocated
 
     def release(self, test_id: str) -> None:
         """Release resources for a test."""
-        if test_id in self.allocated:
-            released = self.allocated.pop(test_id)
-            self.available.extend(released)
-        else:
-            raise ValueError(f"Test ID {test_id} not found in allocated resources.")
+        if test_id not in self.allocated:
+            return
+
+        released = self.allocated.pop(test_id)
+        usage_units = self.test_usage_units.pop(test_id)
+
+        # Decrement usage count for all allocated resources
+        for resource_id in released:
+            current_usage = self.resource_usage_count.get(resource_id, 0)
+            new_usage = max(0, current_usage - usage_units)
+            self.resource_usage_count[resource_id] = new_usage
+
+            # If resource is now completely free, add back to available
+            if new_usage == 0 and resource_id not in self.available:
+                self.available.append(resource_id)
 
 
 @dataclass
@@ -91,7 +139,10 @@ def clean_resources() -> None:
 
 
 def register_resource_provider(
-    resource_type: str, env_variable: str, provider_func: Callable[[], List[int]]
+    resource_type: str,
+    env_variable: str,
+    provider_func: Callable[[], List[int]],
+    max_units_per_resource: int = 16,
 ) -> None:
     with lock_resource_file():
         existing = provider_func()
@@ -104,6 +155,7 @@ def register_resource_provider(
             env_variable=env_variable,
             available=existing,
             allocated={},
+            max_units_per_resource=max_units_per_resource,
         )
         state.save()
 
@@ -154,7 +206,7 @@ def log_resource_allocation(
 
 def setup_resource_environment(
     test_id: str,
-    count: int,
+    count: float,
     resource_type: str,
     wait_timeout: Optional[float] = None,
 ) -> Optional[List[int]]:

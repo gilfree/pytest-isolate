@@ -510,7 +510,7 @@ def report_process_crash(
     elif exitcode != 0:
         info += f"Crashed with exit code {exitcode}"
     else:
-        info += "Exited with no result, memory limit exceeded (probably)"
+        info += "Exited with no result, resource limit exceeded or test error"
 
     call = runner.CallInfo.from_call(lambda: 0 / 0, "???")
     call.excinfo = info
