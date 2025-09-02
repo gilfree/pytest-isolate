@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 import tempfile
 import time
 import warnings
@@ -119,17 +120,17 @@ class StateData:
         if not DEFAULT_STATE_FILE.exists():
             data = {}
         try:
-            with open(DEFAULT_STATE_FILE, "r") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, IOError):
+            with open(DEFAULT_STATE_FILE, "rb") as f:
+                data = pickle.load(f)
+        except Exception:
             data = {}
         return StateData(
             resources={name: Resource(**res) for name, res in data.items()}
         )
 
     def save(self) -> None:
-        with open(DEFAULT_STATE_FILE, "w") as f:
-            json.dump({name: asdict(res) for name, res in self.resources.items()}, f)
+        with open(DEFAULT_STATE_FILE, "wb") as f:
+            pickle.dump({name: asdict(res) for name, res in self.resources.items()}, f)
 
 
 def clean_resources() -> None:
