@@ -486,7 +486,7 @@ def run_in_subprocess(
 
         return results
 
-    return [report_process_crash(item, out, err, exitcode, timed_out)]
+    return [report_process_crash(item, out, err, exitcode, timed_out, result)]
 
 
 def report_process_crash(
@@ -495,6 +495,7 @@ def report_process_crash(
     err,
     exitcode: int,
     timed_out: Optional[int],
+    result: Any,
 ):
     from _pytest._code import getfslineno
 
@@ -511,8 +512,9 @@ def report_process_crash(
         info += f"Crashed with exit code {exitcode}"
     else:
         info += "Exited with no result, resource limit exceeded or test error"
-
-    call = runner.CallInfo.from_call(lambda: 0 / 0, "???")
+    if isinstance(result, BaseException):
+        info = pytest.ExceptionInfo.from_exception(result)
+    call = runner.CallInfo.from_call(lambda: 0 / 0, "call")
     call.excinfo = info
     rep = runner.pytest_runtest_makereport(item, call)
     if out:
@@ -532,8 +534,7 @@ def report_process_crash(
     rep.wasxfail += f"pytest-isolate reason: {call.excinfo}"
 
     warnings.warn(
-        "pytest-isolate xfail support is incomplete at the moment and may "
-        "output a misleading reason message",
+        "pytest-isolate xfail support is incomplete at the moment and may output a misleading reason message",
         RuntimeWarning,
     )
 
@@ -598,23 +599,17 @@ def get_resource_dict(item):
                 RuntimeWarning,
             )
             return resources
-
         # Process each resource requirement
         for resource_type, count in resources_param.items():
             try:
-                count = int(count)
+                count = float(count)
                 if count < 0:
-                    warnings.warn(
-                        f"Invalid {resource_type} count: {count}. Must be >= 0.",
-                        RuntimeWarning,
-                    )
-                    continue
+                    raise ValueError()
                 resources[resource_type] = count
-            except (ValueError, TypeError):
-                warnings.warn(
-                    f"Invalid {resource_type} count: {count}. Must be an integer.",
-                    RuntimeWarning,
-                )
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid {resource_type} count: {count} of type {type(count)}. Must be a non-negative Number.",
+                ) from e
 
     return resources
 

@@ -8,9 +8,11 @@ from unittest import mock
 import pytest
 
 from pytest_isolate.plugin import allocate_resources, get_resource_events
-from pytest_isolate.resource_management import (Resource,
-                                                log_resource_allocation,
-                                                parse_resource_list)
+from pytest_isolate.resource_management import (
+    Resource,
+    log_resource_allocation,
+    parse_resource_list,
+)
 
 
 @pytest.fixture
@@ -98,52 +100,48 @@ def test_resource_fractional_allocation():
     """Test Resource class fractional allocation logic"""
     # Create a resource with 2 resources (e.g., GPUs)
     resource = Resource(
-        env_variable="CUDA_VISIBLE_DEVICES",
-        available=[0, 1],
-        allocated={}
+        env_variable="CUDA_VISIBLE_DEVICES", available=[0, 1], allocated={}
     )
-    
+
     # Test 1/4 allocations can share the same resource
-    res1 = resource.allocate("test1", 1/4)  # 4 units
+    res1 = resource.allocate("test1", 1 / 4)  # 4 units
     assert res1 == [0]
     assert resource.resource_usage_count[0] == 4
-    
-    res2 = resource.allocate("test2", 1/4)  # 4 units  
+
+    res2 = resource.allocate("test2", 1 / 4)  # 4 units
     assert res2 == [0]  # Same resource
     assert resource.resource_usage_count[0] == 8
-    
-    res3 = resource.allocate("test3", 1/4)  # 4 units
+
+    res3 = resource.allocate("test3", 1 / 4)  # 4 units
     assert res3 == [0]  # Same resource
     assert resource.resource_usage_count[0] == 12
-    
-    res4 = resource.allocate("test4", 1/4)  # 4 units
+
+    res4 = resource.allocate("test4", 1 / 4)  # 4 units
     assert res4 == [0]  # Same resource
     assert resource.resource_usage_count[0] == 16
-    
+
     # Fifth 1/4 allocation should go to second resource
-    res5 = resource.allocate("test5", 1/4)  # 4 units
+    res5 = resource.allocate("test5", 1 / 4)  # 4 units
     assert res5 == [1]  # Different resource
     assert resource.resource_usage_count[1] == 4
-    
+
     # Test release
     resource.release("test1")
     assert resource.resource_usage_count[0] == 12
     assert "test1" not in resource.allocated
-    
+
     # Test integer allocation (exclusive)
     resource2 = Resource(
-        env_variable="CUDA_VISIBLE_DEVICES", 
-        available=[0, 1],
-        allocated={}
+        env_variable="CUDA_VISIBLE_DEVICES", available=[0, 1], allocated={}
     )
-    
+
     res_int = resource2.allocate("test_int", 1)
     assert res_int == [0]
     assert 0 not in resource2.available  # Removed from available
-    
+
     # Test invalid fractions
     with pytest.raises(ValueError):
-        resource.allocate("test_invalid", 1/3)
+        resource.allocate("test_invalid", 1 / 3)
 
 
 def test_resource_configurable_max_units():
@@ -153,66 +151,64 @@ def test_resource_configurable_max_units():
         env_variable="TEST_RESOURCE",
         available=[0],
         allocated={},
-        max_units_per_resource=8
+        max_units_per_resource=8,
     )
-    
+
     # Should allow 1/8, 1/4, 1/2, 1
-    res1 = resource8.allocate("test1", 1/8)  # 1 unit
+    res1 = resource8.allocate("test1", 1 / 8)  # 1 unit
     assert res1 == [0]
     assert resource8.resource_usage_count[0] == 1
-    
-    res2 = resource8.allocate("test2", 1/4)  # 2 units  
+
+    res2 = resource8.allocate("test2", 1 / 4)  # 2 units
     assert res2 == [0]
     assert resource8.resource_usage_count[0] == 3
-    
-    res3 = resource8.allocate("test3", 1/2)  # 4 units
+
+    res3 = resource8.allocate("test3", 1 / 2)  # 4 units
     assert res3 == [0]
     assert resource8.resource_usage_count[0] == 7
-    
-    res4 = resource8.allocate("test4", 1/8)  # 1 unit (fills to 8)
+
+    res4 = resource8.allocate("test4", 1 / 8)  # 1 unit (fills to 8)
     assert res4 == [0]
     assert resource8.resource_usage_count[0] == 8
-    
+
     # Should reject 1/16 (not valid for max_units=8)
     with pytest.raises(ValueError):
-        resource8.allocate("test_invalid", 1/16)
-    
+        resource8.allocate("test_invalid", 1 / 16)
+
     # Test with max_units=4
     resource4 = Resource(
         env_variable="TEST_RESOURCE",
         available=[0],
         allocated={},
-        max_units_per_resource=4
+        max_units_per_resource=4,
     )
-    
+
     # Should allow 1/4, 1/2, 1
-    res5 = resource4.allocate("test5", 1/4)  # 1 unit
+    res5 = resource4.allocate("test5", 1 / 4)  # 1 unit
     assert res5 == [0]
     assert resource4.resource_usage_count[0] == 1
-    
+
     # Should reject 1/8 (not valid for max_units=4)
     with pytest.raises(ValueError):
-        resource4.allocate("test_invalid", 1/8)
+        resource4.allocate("test_invalid", 1 / 8)
 
 
 def test_resource_mixed_allocation():
     """Test mixing fractional and integer allocations"""
     resource = Resource(
-        env_variable="CUDA_VISIBLE_DEVICES",
-        available=[0, 1, 2],
-        allocated={}
+        env_variable="CUDA_VISIBLE_DEVICES", available=[0, 1, 2], allocated={}
     )
-    
+
     # Fractional allocation
-    res1 = resource.allocate("test1", 1/2)  # 8 units
+    res1 = resource.allocate("test1", 1 / 2)  # 8 units
     assert res1 == [0]
     assert resource.resource_usage_count[0] == 8
-    
+
     # Another fractional on same resource
-    res2 = resource.allocate("test2", 1/2)  # 8 units
+    res2 = resource.allocate("test2", 1 / 2)  # 8 units
     assert res2 == [0]  # Same resource
     assert resource.resource_usage_count[0] == 16  # Full
-    
+
     # Integer allocation gets different resource
     res3 = resource.allocate("test3", 1)
     assert res3 == [1]

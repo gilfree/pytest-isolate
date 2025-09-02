@@ -45,6 +45,10 @@ class Resource:
     def allocate(self, test_id: str, count: float) -> List[int]:
         """Allocate resources for a test."""
         # Convert to units
+        try:
+            count = float(count)
+        except ValueError:
+            raise ValueError(f"Invalid count: {count}. Must be a Number.")
         if count < 1:
             usage_units = int(count * self.max_units_per_resource)
             if usage_units <= 0 or self.max_units_per_resource % usage_units != 0:
