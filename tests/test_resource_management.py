@@ -70,6 +70,18 @@ def test_allocate_resources():
         assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
 
 
+def test_allocate_resources_fraction():
+    with allocate_resources({"gpu": 0.5}, "foo", 100) as allocated:
+        assert len(allocated["gpu"]) == 1
+        assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(","))
+
+
+@pytest.mark.isolate(resources={"gpu": 0.5}, timeout=10)
+def test_gpu_marker_fraction():
+    sleep(0.3)
+    assert len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")) == 1
+
+
 @pytest.mark.isolate(resources={"gpu": 2}, timeout=10)
 @pytest.mark.parametrize("dummy", [1, 2])
 def test_gpu_marker_2(dummy):
