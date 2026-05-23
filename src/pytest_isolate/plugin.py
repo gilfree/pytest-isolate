@@ -200,7 +200,7 @@ class ForkedSubprocess:
                     out = self.read_out.read()
                     if out:
                         print(out.decode(), file=sys.stdout)
-                    err = self.read_out.read()
+                    err = self.read_err.read()
                     if err:
                         print(err.decode(), file=sys.stderr)
         sys.stdout.flush()
