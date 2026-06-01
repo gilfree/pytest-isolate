@@ -26,6 +26,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 gpu = ["pynvml"]
+dev = ["twine"]
 
 [project.urls]
 Documentation = "https://github.com/gilfree/pytest-isolate#readme"
@@ -39,7 +40,7 @@ pytest_isolate = "pytest_isolate.plugin"
 path = "src/pytest_isolate/__about__.py"
 
 [tool.hatch.envs.default]
-dependencies = ["pytest", "pytest-cov", "numpy", "pytest-xdist"]
+dependencies = ["pytest", "pytest-cov", "numpy", "pytest-xdist", "twine"]
 
 
 [tool.pytest.ini_options]
