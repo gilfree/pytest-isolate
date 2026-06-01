@@ -18,6 +18,9 @@ permissions:
 
 jobs:
   deploy:
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pytest-isolate
 
     runs-on: ubuntu-latest
 
