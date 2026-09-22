@@ -150,6 +150,17 @@ class ForkedSubprocess:
         os.close(self.w_out)
         os.close(self.w_err)
 
+    def _drain_streams(self):
+        """Forward what the child has written. The fds are O_NONBLOCK."""
+        if not self.streams_ready:
+            return
+        out = self.read_out.read()
+        if out:
+            print(out.decode(), file=sys.stdout)
+        err = self.read_err.read()
+        if err:
+            print(err.decode(), file=sys.stderr)
+
     def run_in_subprocess(
         self,
         timeout,
@@ -184,9 +195,11 @@ class ForkedSubprocess:
         delta = self.wait_delta
         time_left = timeout or delta
         result = None
+        done = False
         while time_left > 0:
             try:
                 result = dill.loads(q.get(block=True, timeout=min(delta, time_left)))
+                done = True
             except Empty:
                 if not p.is_alive():
                     break
@@ -194,15 +207,12 @@ class ForkedSubprocess:
                     time_left = time_left - delta
             except Exception as e:
                 result = e
-                break
+                done = True
             finally:
-                if self.streams_ready:
-                    out = self.read_out.read()
-                    if out:
-                        print(out.decode(), file=sys.stdout)
-                    err = self.read_err.read()
-                    if err:
-                        print(err.decode(), file=sys.stderr)
+                self._drain_streams()
+            if done:
+                # One object per child; waiting again costs a whole wait_delta.
+                break
         sys.stdout.flush()
         sys.stderr.flush()
         if time_left <= 0:
@@ -212,6 +222,8 @@ class ForkedSubprocess:
             # On timeout, kill the subprocess
             p.kill()
         p.join()
+        # The child flushes after q.put, so its tail may still be in flight.
+        self._drain_streams()
         return p.exitcode, timed_out, result
 
 
