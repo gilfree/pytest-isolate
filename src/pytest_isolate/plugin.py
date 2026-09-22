@@ -17,6 +17,12 @@ from contextlib import contextmanager
 from queue import Empty
 from typing import Any, List, Optional, Tuple
 
+# torch.cuda.is_available() opens a CUDA context, which does not survive fork.
+# Module scope: pytest imports plugins before conftest. Opt out with
+# PYTEST_ISOLATE_NO_NVML_CUDA_CHECK=1.
+if not os.environ.get("PYTEST_ISOLATE_NO_NVML_CUDA_CHECK"):
+    os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
+
 import _pytest.capture
 import _pytest.warnings
 import pytest

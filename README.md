@@ -127,6 +127,24 @@ For example:
 * If `CUDA_VISIBLE_DEVICES=0,1,2` is set, tests will only use GPUs 0, 1, and 2.
 * If `CUDA_VISIBLE_DEVICES=` is set (empty), no GPUs will be used.
 
+## PyTorch and fork
+
+`torch.cuda.is_available()` opens a CUDA context, and a CUDA context does not
+survive `fork()`. Since every isolated test is forked, one availability check
+before that point breaks the child, so on import this plugin sets:
+
+```sh
+PYTORCH_NVML_BASED_CUDA_CHECK=1
+```
+
+PyTorch then answers from NVML, opening no context, and falls back to the usual
+check if NVML is unavailable.
+
+It is set at import rather than from a hook or an option, because pytest loads
+plugins before importing `conftest.py` and no configuration is parsed that
+early. To override, set `PYTORCH_NVML_BASED_CUDA_CHECK` yourself, or
+`PYTEST_ISOLATE_NO_NVML_CUDA_CHECK=1` to leave the variable untouched.
+
 ## Contributing
 
 Contributions are very welcome. Tests can be run with `tox`, please ensure
