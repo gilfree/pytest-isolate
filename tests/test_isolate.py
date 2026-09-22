@@ -2,7 +2,7 @@ import os
 import random
 import sys
 import warnings
-from time import sleep
+from time import sleep, time
 
 import pytest
 
@@ -84,3 +84,45 @@ def test_isolate_cpu():
 def test_slow():
     sleep(0.1)
     pass
+
+
+# These spawn a pytest subprocess, which costs more than the suite-wide 2 s.
+@pytest.mark.isolate(60)
+def test_passing_test_does_not_wait_a_wait_delta(pytester):
+    """A passing test must not cost a wait_delta. With the bug, three tests at
+    wait_delta=5.0 take 15 s."""
+    pytester.makepyfile(
+        """
+        def test_a(): pass
+        def test_b(): pass
+        def test_c(): pass
+        """
+    )
+    started = time()
+    result = pytester.runpytest_subprocess("--isolate", "-o", "wait_delta=5.0")
+    elapsed = time() - started
+
+    result.assert_outcomes(passed=3)
+    # Interpreter startup dominates what is left, so the margin is wide.
+    assert elapsed < 10.0, (
+        f"three trivial isolated tests took {elapsed:.1f}s at wait_delta=5.0"
+    )
+
+
+@pytest.mark.isolate(60)
+def test_output_survives_the_early_exit(pytester):
+    """The child flushes after putting its result, so the early exit must not
+    truncate output."""
+    pytester.makepyfile(
+        """
+        import sys
+
+        def test_talks():
+            print("OUT-MARKER")
+            print("ERR-MARKER", file=sys.stderr)
+        """
+    )
+    result = pytester.runpytest_subprocess("--isolate", "-s",
+                                           "-o", "wait_delta=0.05")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["*OUT-MARKER*"])
