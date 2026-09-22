@@ -225,3 +225,52 @@ def test_resource_mixed_allocation():
     res3 = resource.allocate("test3", 1)
     assert res3 == [1]
     assert 1 not in resource.available
+
+
+def test_missing_pynvml_is_not_a_warning(monkeypatch):
+    """Absent pynvml must not warn: under filterwarnings=error it became an
+    INTERNALERROR during configure. #11"""
+    import builtins
+    import warnings as _warnings
+
+    from pytest_isolate.plugin import get_available_gpus
+
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    real_import = builtins.__import__
+
+    def no_pynvml(name, *a, **kw):
+        if name == "pynvml":
+            raise ImportError("No module named 'pynvml'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_pynvml)
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")          # exactly the reporter's setup
+        assert get_available_gpus() == []
+
+
+def test_state_file_is_per_process(monkeypatch):
+    """Concurrent runs must not share one accounting file. #12"""
+    from pytest_isolate.resource_management import _default_state_file
+
+    monkeypatch.delenv("PYTEST_ISOLATE_STATE_FILE", raising=False)
+    mine = _default_state_file()
+    assert str(os.getpid()) in mine.name
+
+    monkeypatch.setattr(os, "getpid", lambda: 4242)
+    assert _default_state_file() != mine
+
+    # An explicit path wins: how an xdist worker joins its controller's file.
+    monkeypatch.setenv("PYTEST_ISOLATE_STATE_FILE", "/tmp/pinned-by-controller.json")
+    assert _default_state_file() == Path("/tmp/pinned-by-controller.json")
+
+
+def test_clean_resources_survives_a_lost_race(monkeypatch, tmp_path):
+    """Removing an already-absent file is success, not FileNotFoundError out
+    of pytest_configure. #12"""
+    from pytest_isolate import resource_management as rm
+
+    monkeypatch.setattr(rm, "DEFAULT_STATE_FILE", tmp_path / "gone.json")
+    monkeypatch.setattr(rm, "DEFAULT_EVENTS_FILE", tmp_path / "gone_events.json")
+    rm.clean_resources()          # nothing exists; must not raise
+    rm.clean_resources()          # and twice is still fine

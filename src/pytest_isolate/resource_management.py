@@ -12,14 +12,25 @@ from typing import Callable, Dict, List, Optional
 
 import filelock
 
+from pytest_isolate import PytestIsolateWarning
 from pytest_isolate.tracing import create_event
 
 # Constants
 
-DEFAULT_STATE_FILE = (
-    Path(os.environ.get("PYTEST_ISOLATE_STATE_FOLDER", tempfile.gettempdir()))
-    / "pytest_isolate_resources.json"
-)
+def _default_state_file() -> Path:
+    """This run's resource accounting file, named per process.
+
+    PYTEST_ISOLATE_STATE_FILE pins the path, so an xdist worker joins its
+    controller's; PYTEST_ISOLATE_STATE_FOLDER chooses the directory.
+    """
+    explicit = os.environ.get("PYTEST_ISOLATE_STATE_FILE")
+    if explicit:
+        return Path(explicit)
+    folder = Path(os.environ.get("PYTEST_ISOLATE_STATE_FOLDER", tempfile.gettempdir()))
+    return folder / f"pytest_isolate_resources_{os.getpid()}.json"
+
+
+DEFAULT_STATE_FILE = _default_state_file()
 DEFAULT_EVENTS_FILE = Path(str(DEFAULT_STATE_FILE).replace(".json", "_events.json"))
 POLL_INTERVAL = float(os.environ.get("PYTEST_ISOLATE_POLL_INTERVAL", 0.1))
 DEFAULT_LOCK_TIMEOUT = int(os.environ.get("PYTEST_ISOLATE_LOCK_TIMEOUT", 5))
@@ -134,13 +145,20 @@ class StateData:
 
 
 def clean_resources() -> None:
-    """Clean up resources by removing lock and state files."""
-    if DEFAULT_STATE_FILE.exists():
-        os.remove(DEFAULT_STATE_FILE)
-    if DEFAULT_EVENTS_FILE.exists():
-        os.remove(DEFAULT_EVENTS_FILE)
-    if DEFAULT_STATE_FILE.with_suffix(".lock").exists():
-        os.remove(DEFAULT_STATE_FILE.with_suffix(".lock"))
+    """Remove this run's state, lock and event files.
+
+    missing_ok, not exists()-then-remove: that races. See #12.
+    """
+    for path in (
+        DEFAULT_STATE_FILE,
+        DEFAULT_EVENTS_FILE,
+        DEFAULT_STATE_FILE.with_suffix(".lock"),
+    ):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            # A held lock on Windows, say.
+            pass
 
 
 def register_resource_provider(
@@ -154,7 +172,8 @@ def register_resource_provider(
         state = StateData.get_instance()
         if resource_type in state.resources:
             warnings.warn(
-                f"Resource type {resource_type} already registered. Overwriting."
+                f"Resource type {resource_type} already registered. Overwriting.",
+                PytestIsolateWarning,
             )
         state.resources[resource_type] = Resource(
             env_variable=env_variable,
