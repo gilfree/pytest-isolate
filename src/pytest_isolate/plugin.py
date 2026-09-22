@@ -41,6 +41,7 @@ except ImportError:
     pass
 
 from pytest_isolate.resource_management import (
+    DEFAULT_STATE_FILE,
     clean_resources,
     cleanup_resource_environment,
     get_resource_events,
@@ -48,6 +49,7 @@ from pytest_isolate.resource_management import (
     register_resource_provider,
     setup_resource_environment,
 )
+from pytest_isolate import PytestIsolateWarning
 from pytest_isolate.tracing import create_event
 
 
@@ -60,14 +62,21 @@ def get_available_gpus() -> List[int]:
     # If not set and pynvml is available, get all GPUs
     try:
         import pynvml
+    except ImportError:
+        # Optional; warning here broke filterwarnings=["error"]. See #11.
+        return []
 
+    try:
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
         resources = list(range(count))
         pynvml.nvmlShutdown()
         return resources
-    except Exception:
-        warnings.warn("Failed to get GPU count using pynvml", RuntimeWarning)
+    except Exception as e:
+        # Installed but unable to answer.
+        warnings.warn(
+            f"Failed to get GPU count using pynvml: {e}", PytestIsolateWarning
+        )
 
     return []
 
@@ -323,7 +332,8 @@ def pytest_configure(config):
         warnings.warn(
             "Isolate is a replacement for pytest-fokred. "
             "Pytest-forked will take precedence while installed, "
-            "Forked tests will not have timeout. please uninstall one of the plugins"
+            "Forked tests will not have timeout. please uninstall one of the plugins",
+            PytestIsolateWarning,
         )
     else:
         config.addinivalue_line(
@@ -335,7 +345,8 @@ def pytest_configure(config):
             "Isolate is a replacement for pytest-timeout. "
             "Pytest-timeout will take precedence while installed, "
             "tests with timeout will not be isolated. "
-            "Please uninstall one of the plugins"
+            "Please uninstall one of the plugins",
+            PytestIsolateWarning,
         )
     else:
         config.addinivalue_line(
@@ -344,6 +355,8 @@ def pytest_configure(config):
         )
 
     if os.getenv("PYTEST_XDIST_WORKER") is None:
+        # Workers have their own pids; they inherit this after spawning.
+        os.environ.setdefault("PYTEST_ISOLATE_STATE_FILE", str(DEFAULT_STATE_FILE))
         clean_resources()
         register_resource_provider("gpu", "CUDA_VISIBLE_DEVICES", get_available_gpus)
 
@@ -547,7 +560,7 @@ def report_process_crash(
 
     warnings.warn(
         "pytest-isolate xfail support is incomplete at the moment and may output a misleading reason message",
-        RuntimeWarning,
+        PytestIsolateWarning,
     )
 
     return rep
@@ -608,7 +621,7 @@ def get_resource_dict(item):
         if not isinstance(resources_param, dict):
             warnings.warn(
                 f"Invalid resources parameter {resources_param}. Must be a dictionary.",
-                RuntimeWarning,
+                PytestIsolateWarning,
             )
             return resources
         # Process each resource requirement
