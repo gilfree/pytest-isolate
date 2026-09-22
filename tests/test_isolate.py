@@ -126,3 +126,36 @@ def test_output_survives_the_early_exit(pytester):
                                            "-o", "wait_delta=0.05")
     result.assert_outcomes(passed=1)
     result.stdout.fnmatch_lines(["*OUT-MARKER*"])
+
+
+def test_nvml_cuda_check_is_set_by_importing_the_plugin():
+    """Set at import: a conftest touching torch.cuda would beat any hook."""
+    assert os.environ.get("PYTORCH_NVML_BASED_CUDA_CHECK") == "1"
+
+
+def test_an_explicit_value_is_left_alone(pytester, monkeypatch):
+    """An explicit value survives."""
+    monkeypatch.setenv("PYTORCH_NVML_BASED_CUDA_CHECK", "0")
+    pytester.makepyfile(
+        """
+        import os
+
+        def test_kept():
+            assert os.environ["PYTORCH_NVML_BASED_CUDA_CHECK"] == "0"
+        """
+    )
+    pytester.runpytest_subprocess().assert_outcomes(passed=1)
+
+
+def test_the_opt_out_switches_it_off(pytester, monkeypatch):
+    monkeypatch.setenv("PYTEST_ISOLATE_NO_NVML_CUDA_CHECK", "1")
+    monkeypatch.delenv("PYTORCH_NVML_BASED_CUDA_CHECK", raising=False)
+    pytester.makepyfile(
+        """
+        import os
+
+        def test_unset():
+            assert "PYTORCH_NVML_BASED_CUDA_CHECK" not in os.environ
+        """
+    )
+    pytester.runpytest_subprocess().assert_outcomes(passed=1)
