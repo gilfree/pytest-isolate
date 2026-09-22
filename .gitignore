@@ -74,3 +74,5 @@ target/
 # pyenv
 .python-version
 
+# Timeline artefacts written by --timeline / timeline_file during test runs
+timeline.*.json
