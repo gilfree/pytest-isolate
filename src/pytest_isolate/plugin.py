@@ -402,7 +402,14 @@ def catch_warnings(item: pytest.Item):
 
 
 def run_subprocess(item: pytest.Item):
-    item.config.pluginmanager.unregister(name="capturemanager")
+    # The parent's capture manager holds the parent's fds; the child writes to
+    # the pipe instead. A fresh "no" manager is `-s`: no global capture, but
+    # capsys, capfd and friends still have their set_fixture().
+    pluginmanager = item.config.pluginmanager
+    pluginmanager.unregister(name="capturemanager")
+    capman = _pytest.capture.CaptureManager("no")
+    pluginmanager.register(capman, "capturemanager")
+    capman.start_global_capturing()
     try:
         if not os.getenv("PYTEST_ISOLATE_NO_SETPROCTITLE"):
             import setproctitle  # noqa F811
