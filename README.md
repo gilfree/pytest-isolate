@@ -16,6 +16,7 @@ This pytest plugin was generated with Cookiecutter along with `@hackebrot`'s `co
 * Add Timeout to a forked test
 * Limit memory used by test
 * Limit CPU time used by test
+* Report each test's CPU time and peak memory with `--durations`
 * Manage GPU resources with CUDA_VISIBLE_DEVICES, with support for fractional requests (1/2, 1/4, 1/8, 1/16)
 * Plays nice with pytest-xdist
 * Shows warnings, even with xdist!
@@ -58,6 +59,14 @@ Or:
     pytest --isolate-timeout 10 --isolate-mem-limit 1000000 --isolate-cpu-limit 10
 
 To set a timeout to every test in addition to forking, and limit to 10 cpu seconds.
+
+Or:
+
+    pytest --isolate --durations 0
+
+To list each test's CPU time and peak memory, to size `--isolate-mem-limit`
+against. `data` is an upper bound on the peak that the limit (`RLIMIT_DATA`)
+sees, and `rss` is the peak resident memory. Linux only; it needs `/proc`.
 
 Or:
 

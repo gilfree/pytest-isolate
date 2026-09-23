@@ -185,3 +185,27 @@ def test_capture_fixtures_work_in_the_child(pytester, fixture, write, expected):
         """
     )
     pytester.runpytest_subprocess("--isolate").assert_outcomes(passed=1)
+
+
+@pytest.mark.isolate(60)
+@pytest.mark.skipif(not os.path.exists("/proc/self/status"), reason="needs /proc")
+def test_durations_report_peak_memory_of_a_freed_allocation(pytester):
+    """Freed before the test ends, so VmData alone would miss it."""
+    pytester.makepyfile(
+        """
+        def test_big():
+            block = bytearray(300 * 2**20)
+            block[::4096] = b"x" * len(block[::4096])
+            del block
+
+        def test_small():
+            pass
+        """
+    )
+    result = pytester.runpytest_subprocess("--isolate", "--durations", "0")
+    result.assert_outcomes(passed=2)
+    lines = result.stdout.lines
+    rows = lines[lines.index(next(x for x in lines if "peak memory" in x)) + 1:][:2]
+    data, rss = (float(rows[0].split()[i]) for i in (0, 3))
+    assert rows[0].endswith("::test_big"), rows
+    assert data >= 300 and rss >= 300, rows[0]

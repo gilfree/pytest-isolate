@@ -401,6 +401,38 @@ def catch_warnings(item: pytest.Item):
         yield log
 
 
+def _proc_status_mib(*keys: str) -> dict:
+    """Fields of /proc/self/status in MiB; empty where there is no /proc."""
+    try:
+        with open("/proc/self/status") as f:
+            fields = dict(line.split(":", 1) for line in f if ":" in line)
+    except OSError:
+        return {}
+    return {k: int(fields[k].split()[0]) / 1024 for k in keys if k in fields}
+
+
+def _reset_peak_rss() -> None:
+    """Restart VmHWM at the current RSS; the fork inherits the parent's."""
+    try:
+        with open("/proc/self/clear_refs", "w") as f:
+            f.write("5")
+    except OSError:
+        pass
+
+
+def _memory_usage(start: dict, end: dict) -> dict:
+    """Peak RSS, and an upper bound on the peak that RLIMIT_DATA sees.
+
+    Linux keeps no peak VmData, and VmData misses anything freed before the
+    test ends. VmPeak does not, but counts shared libraries too, so take the
+    test's growth in VmPeak on top of VmData at the start.
+    """
+    if not ({"VmData", "VmSize"} <= start.keys() and {"VmPeak", "VmHWM"} <= end.keys()):
+        return {}
+    growth = max(0.0, end["VmPeak"] - start["VmSize"])
+    return {"peak_rss_mib": end["VmHWM"], "peak_data_mib": start["VmData"] + growth}
+
+
 def run_subprocess(item: pytest.Item):
     # The parent's capture manager holds the parent's fds; the child writes to
     # the pipe instead. A fresh "no" manager is `-s`: no global capture, but
@@ -418,8 +450,11 @@ def run_subprocess(item: pytest.Item):
     except ImportError:
         pass
     try:
+        _reset_peak_rss()
+        mem_start = _proc_status_mib("VmData", "VmSize")
         with catch_warnings(item) as warnings:
             reports = runtestprotocol(item, log=False)
+        memory = _memory_usage(mem_start, _proc_status_mib("VmPeak", "VmHWM"))
         s_reports = []
         for report in reports:
             usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -428,6 +463,9 @@ def run_subprocess(item: pytest.Item):
             cpu_usage += usage.ru_utime + usage.ru_stime
             report.user_properties.append(("cpu_usage", cpu_usage))
             report.cpu_usage = cpu_usage
+            for name, value in memory.items():
+                report.user_properties.append((name, value))
+                setattr(report, name, value)
             s_reports.append(
                 item.config.hook.pytest_report_to_serializable(
                     config=item.config, report=report
@@ -775,6 +813,26 @@ def get_isolation_options(item):
     return isolate, timeout, mem_limit, cpu_limit, resource_dict
 
 
+def _write_memory_summary(tr, reports, durations) -> None:
+    """Tests by peak data, the figure to size mem_limit against."""
+    reports = [
+        r for r in reports if r.when == "teardown" and hasattr(r, "peak_data_mib")
+    ]
+    if not reports:
+        return
+    reports.sort(key=lambda r: r.peak_data_mib, reverse=True)
+    title = "highest peak memory (data <= bound, rss)"
+    if durations:
+        title = f"highest {durations} peak memory (data <= bound, rss)"
+        reports = reports[:durations]
+    tr.write_sep("=", title)
+    for r in reports:
+        tr.write_line(
+            f"{r.peak_data_mib:8.0f} MiB data  {r.peak_rss_mib:8.0f} MiB rss  "
+            f"{r.nodeid}"
+        )
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     if terminalreporter.config.getoption("noisolate"):
@@ -795,6 +853,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
                     dlist.append(rep)
         if not dlist:
             return
+        dlist_all = list(dlist)
         dlist.sort(key=lambda x: x.cpu_usage, reverse=True)  # type: ignore[no-any-return]
         if not durations:
             tr.write_sep("=", "highest cpu_usage")
@@ -812,6 +871,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
                 break
             if rep.when == "teardown":
                 tr.write_line(f"{rep.cpu_usage:02.2f}s {rep.nodeid}")
+        _write_memory_summary(tr, dlist_all, durations)
 
     if config.getoption("timeline"):
         events = []
