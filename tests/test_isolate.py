@@ -159,3 +159,29 @@ def test_the_opt_out_switches_it_off(pytester, monkeypatch):
         """
     )
     pytester.runpytest_subprocess().assert_outcomes(passed=1)
+
+
+
+@pytest.mark.isolate(60)
+@pytest.mark.parametrize(
+    "fixture, write, expected",
+    [
+        ("capsys", 'print("SYS")', '"SYS\\n"'),
+        ("capsysbinary", 'print("SYS")', 'b"SYS\\n"'),
+        ("capfd", 'os.write(1, b"FD\\n")', '"FD\\n"'),
+        ("capfdbinary", 'os.write(1, b"FD\\n")', 'b"FD\\n"'),
+    ],
+)
+def test_capture_fixtures_work_in_the_child(pytester, fixture, write, expected):
+    """The child drops the parent's capturemanager; the capture fixtures still
+    need one."""
+    pytester.makepyfile(
+        f"""
+        import os
+
+        def test_reads_its_output({fixture}):
+            {write}
+            assert {fixture}.readouterr().out == {expected}
+        """
+    )
+    pytester.runpytest_subprocess("--isolate").assert_outcomes(passed=1)
