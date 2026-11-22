@@ -45,6 +45,7 @@ try:
 except ImportError:
     pass
 
+from pytest_isolate import PytestIsolateWarning
 from pytest_isolate.resource_management import (
     DEFAULT_STATE_FILE,
     clean_resources,
@@ -54,7 +55,6 @@ from pytest_isolate.resource_management import (
     register_resource_provider,
     setup_resource_environment,
 )
-from pytest_isolate import PytestIsolateWarning
 from pytest_isolate.tracing import create_event
 
 
@@ -605,7 +605,8 @@ def report_process_crash(
     rep.wasxfail += f"pytest-isolate reason: {call.excinfo}"
 
     warnings.warn(
-        "pytest-isolate xfail support is incomplete at the moment and may output a misleading reason message",
+        "pytest-isolate xfail support is incomplete at the moment "
+        "and may output a misleading reason message",
         PytestIsolateWarning,
     )
 
@@ -679,7 +680,8 @@ def get_resource_dict(item):
                 resources[resource_type] = count
             except Exception as e:
                 raise ValueError(
-                    f"Invalid {resource_type} count: {count} of type {type(count)}. Must be a non-negative Number.",
+                    f"Invalid {resource_type} count: {count} of type {type(count)}. "
+                    "Must be a non-negative Number.",
                 ) from e
 
     return resources
