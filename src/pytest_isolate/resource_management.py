@@ -65,7 +65,8 @@ class Resource:
             usage_units = int(count * self.max_units_per_resource)
             if usage_units <= 0 or self.max_units_per_resource % usage_units != 0:
                 raise ValueError(
-                    f"Fraction {count} does not divide evenly into {self.max_units_per_resource} units"
+                    f"Fraction {count} does not divide evenly into "
+                    f"{self.max_units_per_resource} units"
                 )
 
             # Fractional: find one resource with enough capacity
