@@ -25,7 +25,6 @@ if not os.environ.get("PYTEST_ISOLATE_NO_NVML_CUDA_CHECK"):
 
 import _pytest.capture
 import pytest
-from _pytest import runner
 from _pytest.config import apply_warning_filters, parse_warning_filter
 from _pytest.runner import runtestprotocol
 
@@ -377,7 +376,7 @@ def catch_warnings(item: pytest.Item):
     Each warning captured triggers the ``pytest_warning_recorded`` hook.
     """
     config_filters = item.config.getini("filterwarnings")
-    cmdline_filters = item.config.known_args_namespace.pythonwarnings or []
+    cmdline_filters = item.config.getoption("pythonwarnings") or []
     with warnings.catch_warnings(record=True) as log:
         # mypy can't infer that record=True means log is not None; help it.
         assert log is not None
@@ -573,12 +572,8 @@ def report_process_crash(
     timed_out: Optional[int],
     result: Any,
 ):
-    from _pytest._code import getfslineno
-
-    path, lineno = getfslineno(item)
-    info = ""
-    if (path, lineno) != ("", -1):
-        info += f"{path}, {lineno}: "
+    path, lineno, _ = item.location
+    info = f"{path}:{lineno + 1}: " if lineno is not None else f"{path}: "
 
     if timed_out is not None:
         info += f"Timeout > {timed_out}"
@@ -590,9 +585,9 @@ def report_process_crash(
         info += "Exited with no result, resource limit exceeded or test error"
     if isinstance(result, BaseException):
         info = pytest.ExceptionInfo.from_exception(result)
-    call = runner.CallInfo.from_call(lambda: 0 / 0, "call")
+    call = pytest.CallInfo.from_call(lambda: 0 / 0, "call")
     call.excinfo = info
-    rep = runner.pytest_runtest_makereport(item, call)
+    rep = pytest.TestReport.from_item_and_call(item, call)
     if out:
         rep.sections.append(("captured stdout", out))
     if err:
@@ -841,8 +836,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         return
     if terminalreporter.config.pluginmanager.get_plugin("timeout"):
         return
-    durations = terminalreporter.config.option.durations
-    durations_min = terminalreporter.config.option.durations_min or 0
+    durations = config.getoption("durations")
+    durations_min = config.getoption("durations_min") or 0
     verbose = terminalreporter.config.getvalue("verbose")
     tr = terminalreporter
     if durations is not None:

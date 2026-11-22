@@ -7,6 +7,10 @@ on:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+  schedule:
+    # Weekly, so a new pytest release or pytest main breaks CI before it breaks users.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -18,14 +22,18 @@ jobs:
         os:
           - Ubuntu
         py:
+          - "3.14"
+          - "3.13"
           - "3.12"
           - "3.9"
     steps:
       - name: Setup python for test ${{ matrix.py }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.py }}
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install tox-gh
         run: python -m pip install tox-gh
       - name: Setup test suite
@@ -34,3 +42,20 @@ jobs:
         run: tox r --skip-pkg-install
         env:
           PYTEST_ADDOPTS: "-vv --durations=10"
+
+  pytest-main:
+    name: test 3.14 - pytest main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install tox
+        run: python -m pip install tox
+      - name: Run test suite against pytest main
+        run: tox r -e py314-pytestmain
+        env:
+          PYTEST_ADDOPTS: "-vv"
