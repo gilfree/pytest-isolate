@@ -24,9 +24,9 @@ if not os.environ.get("PYTEST_ISOLATE_NO_NVML_CUDA_CHECK"):
     os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
 
 import _pytest.capture
-import _pytest.warnings
 import pytest
 from _pytest import runner
+from _pytest.config import apply_warning_filters, parse_warning_filter
 from _pytest.runner import runtestprotocol
 
 try:
@@ -388,14 +388,14 @@ def catch_warnings(item: pytest.Item):
             warnings.filterwarnings("always", category=DeprecationWarning)
             warnings.filterwarnings("always", category=PendingDeprecationWarning)
 
-        _pytest.warnings.apply_warning_filters(config_filters, cmdline_filters)
+        apply_warning_filters(config_filters, cmdline_filters)
 
         # apply filters from "filterwarnings" marks
         if item is not None:
             for mark in item.iter_markers(name="filterwarnings"):
                 for arg in mark.args:
                     warnings.filterwarnings(
-                        *_pytest.warnings.parse_warning_filter(arg, escape=False)
+                        *parse_warning_filter(arg, escape=False)
                     )
 
         yield log
